@@ -40,6 +40,11 @@
     .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0f1a33;border:1px solid var(--border)}
     .hidden{display:none}
     .sticky-bar{position:sticky;top:0;z-index:5;background:rgba(14,21,40,.75);backdrop-filter: blur(6px);border-bottom:1px solid var(--border)}
+    .charts{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+    .chart-card{grid-column:span 12;background:#0c1426;border:1px solid var(--border);border-radius:12px;padding:12px}
+    .chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:var(--muted)}
+    .chart{width:100%;height:260px}
+    .btn-link{background:transparent;border-color:transparent;color:var(--accent);text-decoration:underline;cursor:pointer}
   </style>
 </head>
 <body>
@@ -115,6 +120,12 @@
           <div class="row" id="actionTypes"></div>
           <div class="footer">If none selected, all action types are included.</div>
         </div>
+        <div class="col" style="grid-column: span 6">
+          <label>Comments filter</label>
+          <div class="check-group">
+            <label class="chip"><input id="onlyComments" type="checkbox" /> Only comments</label>
+          </div>
+        </div>
       </div>
 
       <div class="row" style="margin-top:16px;justify-content:space-between">
@@ -142,8 +153,9 @@
       </div>
 
       <div class="sticky-bar panel" style="margin-top:8px">
-        <div class="row">
-          <div class="muted">Preview (first 200 items)</div>
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div class="muted" id="previewLabel">Preview (all rows)</div>
+          <label class="chip"><input id="previewAll" type="checkbox" checked /> Preview all rows</label>
         </div>
       </div>
 
@@ -158,13 +170,31 @@
         <div class="muted">Monthly Report (built from <strong>Actions</strong> — includes comments when no type is selected)</div>
         <div class="row">
           <button id="btnActionsCsv" class="btn-secondary" disabled>Download Actions CSV</button>
+          <button id="btnCommentsCsv" class="btn-secondary" disabled>Download Comments CSV</button>
           <button id="btnTypesCsv" class="btn-secondary" disabled>Download By‑Type CSV</button>
           <button id="btnMembersCsv" class="btn-secondary" disabled>Download By‑Member CSV</button>
           <button id="btnDaysCsv" class="btn-secondary" disabled>Download By‑Day CSV</button>
+          <button id="btnPdf" class="btn-secondary" disabled>Generate PDF report</button>
         </div>
       </div>
       <div id="reportBox" class="panel" style="margin-top:10px">
         <div class="alert muted">Filter Actions to build a monthly report (includes comments).</div>
+      </div>
+
+      <div id="chartsSection" class="panel hidden" style="margin-top:10px">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div class="muted">Charts (Actions by Type / Member / Day)</div>
+          <div class="row">
+            <label class="chip">Top members: <input id="topMembers" type="number" min="3" max="50" value="10" style="width:72px;margin-left:8px"></label>
+            <button id="btnRenderCharts" class="btn-secondary" disabled>Render Charts</button>
+            <button id="btnDownloadCharts" class="btn-secondary" disabled>Download Charts (PNG)</button>
+          </div>
+        </div>
+        <div class="charts">
+          <div class="chart-card"><div class="chart-head"><span>Actions by Type</span></div><svg id="chartType" class="chart" viewBox="0 0 800 260"></svg></div>
+          <div class="chart-card"><div class="chart-head"><span>Actions by Member</span></div><svg id="chartMember" class="chart" viewBox="0 0 800 260"></svg></div>
+          <div class="chart-card"><div class="chart-head"><span>Actions by Day</span></div><svg id="chartDay" class="chart" viewBox="0 0 800 260"></svg></div>
+        </div>
       </div>
     </section>
 
@@ -172,388 +202,630 @@
   </div>
 
 <script>
-(function(){
-  // ---------- Utilities ----------
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-  const byId = (id) => document.getElementById(id);
+// Ensure the DOM is fully loaded before running any code
+document.addEventListener('DOMContentLoaded', function(){
+  (function(){
+    // ---------- Utilities ----------
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const byId = (id) => document.getElementById(id);
 
-  function monthRange(year, month){
-    const start = new Date(Date.UTC(year, month-1, 1));
-    const end = new Date(Date.UTC(month===12?year+1:year, month===12?0:month, 1));
-    return {start, end};
-  }
-  function parseISO(s){ if(!s) return null; const d = new Date(s); return isNaN(d) ? null : d; }
-  function createdFromId(id){
-    try{ const secs = parseInt(id.slice(0,8),16); return new Date(secs*1000); }catch{ return null }
-  }
-  function dl(filename, text){
-    const blob = new Blob([text], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 2000);
-  }
-  function dlCsv(filename, rows, headers){
-    const encode = (v)=>{
-      if(v===null||v===undefined) return '';
-      const s = String(v);
-      return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
-    };
-    const cols = headers || Object.keys(rows[0]||{});
-    const lines = [cols.join(',')].concat(rows.map(r=>cols.map(c=>encode(r[c])).join(',')));
-    const blob = new Blob([lines.join('\n')], {type:'text/csv'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 2000);
-  }
+    function monthRange(year, month){
+      const start = new Date(Date.UTC(year, month-1, 1));
+      const end = new Date(Date.UTC(month===12?year+1:year, month===12?0:month, 1));
+      return {start, end};
+    }
+    function parseISO(s){ if(!s) return null; const d = new Date(s); return isNaN(d) ? null : d; }
+    function createdFromId(id){
+      try{ const secs = parseInt(id.slice(0,8),16); return new Date(secs*1000); }catch{ return null }
+    }
+    function dl(filename, text){
+      const blob = new Blob([text], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    }
+    function dlCsv(filename, rows, headers){
+      const encode = (v)=>{
+        if(v===null||v===undefined) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+      };
+      const cols = headers || Object.keys(rows[0]||{});
+      const lines = [cols.join(',')].concat(rows.map(r=>cols.map(c=>encode(r[c])).join(',')));
+      const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    }
 
-  // ---------- State ----------
-  let board = null; // parsed Trello export
-  let lastResult = null; // filtered array
+    // ---------- State ----------
+    let board = null; // parsed Trello export
+    let lastResult = null; // filtered array
 
-  // ---------- DOM refs ----------
-  const fileInput = byId('file');
-  const jsonText = byId('jsonText');
-  const year = byId('year');
-  const month = byId('month');
-  const status = byId('status');
-  const btnFilter = byId('btnFilter');
-  const btnDownload = byId('btnDownload');
-  const btnCopy = byId('btnCopy');
-  const kCards = byId('kCards');
-  const kActions = byId('kActions');
-  const kFiltered = byId('kFiltered');
-  const preview = byId('preview');
-  const cardsOptions = byId('cardsOptions');
-  const actionsOptions = byId('actionsOptions');
-  const cardDateField = byId('cardDateField');
-  const includeClosed = byId('includeClosed');
-  const actionTypesWrap = byId('actionTypes');
-  const reportBox = byId('reportBox');
-  const btnActionsCsv = byId('btnActionsCsv');
-  const btnTypesCsv = byId('btnTypesCsv');
-  const btnMembersCsv = byId('btnMembersCsv');
-  const btnDaysCsv = byId('btnDaysCsv');
+    // ---------- DOM refs ----------
+    const fileInput = byId('file');
+    const jsonText = byId('jsonText');
+    const year = byId('year');
+    const month = byId('month');
+    const status = byId('status');
+    const btnFilter = byId('btnFilter');
+    const btnDownload = byId('btnDownload');
+    const btnCopy = byId('btnCopy');
+    const kCards = byId('kCards');
+    const kActions = byId('kActions');
+    const kFiltered = byId('kFiltered');
+    const preview = byId('preview');
+    const previewAll = byId('previewAll');
+    const previewLabel = byId('previewLabel');
+    const cardsOptions = byId('cardsOptions');
+    const actionsOptions = byId('actionsOptions');
+    const cardDateField = byId('cardDateField');
+    const includeClosed = byId('includeClosed');
+    const actionTypesWrap = byId('actionTypes');
+    const onlyComments = byId('onlyComments');
+    const reportBox = byId('reportBox');
+    const btnActionsCsv = byId('btnActionsCsv');
+    const btnCommentsCsv = byId('btnCommentsCsv');
+    const btnTypesCsv = byId('btnTypesCsv');
+    const btnMembersCsv = byId('btnMembersCsv');
+    const btnDaysCsv = byId('btnDaysCsv');
+    const btnPdf = byId('btnPdf');
+    const chartsSection = byId('chartsSection');
+    const btnRenderCharts = byId('btnRenderCharts');
+    const btnDownloadCharts = byId('btnDownloadCharts');
+    const topMembers = byId('topMembers');
+    const chartEls = { type: byId('chartType'), member: byId('chartMember'), day: byId('chartDay') };
 
-  // ---------- Setup defaults ----------
-  const now = new Date();
-  year.value = now.getUTCFullYear();
-  month.value = now.getUTCMonth()+1;
+    // ---------- Setup defaults ----------
+    const now = new Date();
+    year.value = now.getUTCFullYear();
+    month.value = now.getUTCMonth()+1;
 
-  // Popular action types
-  const POP_TYPES = [
-    'createCard','commentCard','updateCard','copyCard','deleteCard','moveCardToBoard','moveCardFromBoard',
-    'convertToCardFromCheckItem','addChecklistToCard','removeChecklistFromCard','addAttachmentToCard','addMemberToCard'
-  ];
-  POP_TYPES.forEach(t=>{
-    const id = `t_${t}`;
-    const label = document.createElement('label');
-    label.className = 'chip';
-    label.innerHTML = `<input type="checkbox" value="${t}" id="${id}"> ${t}`;
-    actionTypesWrap.appendChild(label);
-  });
+    // Popular action types
+    const POP_TYPES = [
+      'createCard','commentCard','updateCard','copyCard','deleteCard','moveCardToBoard','moveCardFromBoard',
+      'convertToCardFromCheckItem','addChecklistToCard','removeChecklistFromCard','addAttachmentToCard','addMemberToCard'
+    ];
+    POP_TYPES.forEach(t=>{
+      const id = `t_${t}`;
+      const label = document.createElement('label');
+      label.className = 'chip';
+      label.innerHTML = `<input type="checkbox" value="${t}" id="${id}"> ${t}`;
+      actionTypesWrap.appendChild(label);
+    });
 
-  // ---------- Target toggle ----------
-  $$("input[name='target']").forEach(r=>{
-    r.addEventListener('change',()=>{
-      const val = document.querySelector("input[name='target']:checked").value;
-      cardsOptions.classList.toggle('hidden', val!=="cards");
-      actionsOptions.classList.toggle('hidden', val!=="actions");
-      document.getElementById('reportSection').classList.toggle('hidden', val!=="actions");
+    // ---------- Target toggle ----------
+    $$("input[name='target']").forEach(r=>{
+      r.addEventListener('change',()=>{
+        const val = document.querySelector("input[name='target']:checked").value;
+        cardsOptions.classList.toggle('hidden', val!=="cards");
+        actionsOptions.classList.toggle('hidden', val!=="actions");
+        document.getElementById('reportSection').classList.toggle('hidden', val!=="actions");
+      })
     })
-  })
 
-  // ---------- Load handlers ----------
-  fileInput.addEventListener('change', async (e)=>{
-    const f = e.target.files?.[0];
-    if(!f){ return; }
-    try{
-      const text = await f.text();
-      const data = JSON.parse(text);
-      board = data; jsonText.value = '';
-      updateStats();
-      status.textContent = `Loaded file: ${f.name}`;
-      preview.innerHTML = `<div class='alert'>File loaded. Choose filters then click <strong>Filter</strong>.</div>`;
-      clearReport();
-    }catch(err){
-      status.textContent = 'Failed to parse JSON file';
-    }
-  });
-
-  jsonText.addEventListener('blur', ()=>{
-    if(!jsonText.value.trim()) return;
-    try{
-      const data = JSON.parse(jsonText.value);
-      board = data; fileInput.value = '';
-      updateStats();
-      status.textContent = 'JSON pasted';
-      preview.innerHTML = `<div class='alert'>JSON parsed. Choose filters then click <strong>Filter</strong>.</div>`;
-      clearReport();
-    }catch(err){ status.textContent = 'Invalid JSON (paste)'; }
-  });
-
-  function updateStats(){
-    if(!board){ kCards.textContent = '0'; kActions.textContent='0'; return; }
-    const cards = Array.isArray(board.cards)? board.cards.length : 0;
-    const actions = Array.isArray(board.actions)? board.actions.length : 0;
-    kCards.textContent = String(cards);
-    kActions.textContent = String(actions);
-  }
-
-  // ---------- Filtering core ----------
-  function indexFirstCreateActions(actions){
-    const map = new Map(); // cardId -> Date
-    for(const a of actions||[]){
-      if(a?.type === 'createCard'){
-        const cardId = a?.data?.card?.id; const dt = parseISO(a?.date);
-        if(cardId && dt){ if(!map.has(cardId) || dt < map.get(cardId)) map.set(cardId, dt); }
+    // ---------- Load handlers ----------
+    fileInput.addEventListener('change', async (e)=>{
+      const f = e.target.files?.[0];
+      if(!f){ return; }
+      try{
+        const text = await f.text();
+        const data = JSON.parse(text);
+        board = data; jsonText.value = '';
+        updateStats();
+        status.textContent = `Loaded file: ${f.name}`;
+        preview.innerHTML = `<div class='alert'>File loaded. Choose filters then click <strong>Filter</strong>.</div>`;
+        clearReport();
+      }catch(err){
+        status.textContent = 'Failed to parse JSON file';
       }
-    }
-    return map;
-  }
+    });
 
-  function filterCardsByMonth(board, year, month, dateField, includeClosed){
-    const {start,end} = monthRange(year, month);
-    const cards = board.cards || [];
-    const createIdx = indexFirstCreateActions(board.actions);
-    const out = [];
-    for(const c of cards){
-      if(!includeClosed && c.closed) continue;
-      let dt = null;
-      if(dateField === 'created'){ dt = createIdx.get(c.id) || createdFromId(c.id); }
-      else if(dateField === 'due'){ dt = parseISO(c.due); }
-      else if(dateField === 'lastActivity'){ dt = parseISO(c.dateLastActivity); }
-      if(!dt) continue;
-      if(dt >= start && dt < end){
+    jsonText.addEventListener('blur', ()=>{
+      if(!jsonText.value.trim()) return;
+      try{
+        const data = JSON.parse(jsonText.value);
+        board = data; fileInput.value = '';
+        updateStats();
+        status.textContent = 'JSON pasted';
+        preview.innerHTML = `<div class='alert'>JSON parsed. Choose filters then click <strong>Filter</strong>.</div>`;
+        clearReport();
+      }catch(err){ status.textContent = 'Invalid JSON (paste)'; }
+    });
+
+    function updateStats(){
+      if(!board){ kCards.textContent = '0'; kActions.textContent='0'; return; }
+      const cards = Array.isArray(board.cards)? board.cards.length : 0;
+      const actions = Array.isArray(board.actions)? board.actions.length : 0;
+      kCards.textContent = String(cards);
+      kActions.textContent = String(actions);
+    }
+
+    // ---------- Filtering core ----------
+    function indexFirstCreateActions(actions){
+      const map = new Map(); // cardId -> Date
+      for(const a of actions||[]){
+        if(a?.type === 'createCard'){
+          const cardId = a?.data?.card?.id; const dt = parseISO(a?.date);
+          if(cardId && dt){ if(!map.has(cardId) || dt < map.get(cardId)) map.set(cardId, dt); }
+        }
+      }
+      return map;
+    }
+
+    function filterCardsByMonth(board, year, month, dateField, includeClosed){
+      const {start,end} = monthRange(year, month);
+      const cards = board.cards || [];
+      const createIdx = indexFirstCreateActions(board.actions);
+      const out = [];
+      for(const c of cards){
+        if(!includeClosed && c.closed) continue;
+        let dt = null;
+        if(dateField === 'created'){ dt = createIdx.get(c.id) || createdFromId(c.id); }
+        else if(dateField === 'due'){ dt = parseISO(c.due); }
+        else if(dateField === 'lastActivity'){ dt = parseISO(c.dateLastActivity); }
+        if(!dt) continue;
+        if(dt >= start && dt < end){
+          out.push({
+            id: c.id,
+            name: c.name,
+            listId: c.idList,
+            due: c.due,
+            dateLastActivity: c.dateLastActivity,
+            createdAt: (createIdx.get(c.id) || createdFromId(c.id))?.toISOString() ?? null
+          });
+        }
+      }
+      return out;
+    }
+
+    function filterActionsByMonth(board, year, month, types){
+      const {start,end} = monthRange(year, month);
+      const set = types && types.length ? new Set(types) : null;
+      const out = [];
+      for(const a of board.actions || []){
+        const dt = parseISO(a.date);
+        if(!dt || dt < start || dt >= end) continue;
+        if(set && !set.has(a.type)) continue;
         out.push({
-          id: c.id,
-          name: c.name,
-          listId: c.idList,
-          due: c.due,
-          dateLastActivity: c.dateLastActivity,
-          createdAt: (createIdx.get(c.id) || createdFromId(c.id))?.toISOString() ?? null
+          date: new Date(a.date).toISOString(),
+          type: a.type,
+          memberCreator: a?.memberCreator?.fullName,
+          memberId: a?.memberCreator?.id,
+          card: a?.data?.card?.name,
+          cardId: a?.data?.card?.id,
+          list: a?.data?.list?.name || a?.data?.listAfter?.name,
+          data: a.data
         });
       }
+      return out;
     }
-    return out;
-  }
 
-  function filterActionsByMonth(board, year, month, types){
-    const {start,end} = monthRange(year, month);
-    const set = types && types.length ? new Set(types) : null;
-    const out = [];
-    for(const a of board.actions || []){
-      const dt = parseISO(a.date);
-      if(!dt || dt < start || dt >= end) continue;
-      if(set && !set.has(a.type)) continue;
-      out.push({
-        date: new Date(a.date).toISOString(),
-        type: a.type,
-        memberCreator: a?.memberCreator?.fullName,
-        memberId: a?.memberCreator?.id,
-        card: a?.data?.card?.name,
-        cardId: a?.data?.card?.id,
-        list: a?.data?.list?.name || a?.data?.listAfter?.name,
-        data: a.data
+    // ---------- Report ----------
+    function buildReport(actions){
+      const summary = {
+        total: actions.length,
+        comments: 0,
+        creates: 0,
+        deletes: 0,
+        movesToBoard: 0,
+        movesFromBoard: 0,
+        updates: 0,
+        attachments: 0,
+        checklists: 0,
+        uniqueMembers: new Set(),
+        perType: new Map(),
+        perMember: new Map(),
+        perDay: new Map()
+      };
+
+      for(const a of actions){
+        summary.uniqueMembers.add(a.memberId || a.memberCreator || 'Unknown');
+        inc(summary.perType, a.type);
+        inc(summary.perMember, a.memberCreator || 'Unknown');
+        const day = (a.date||'').slice(0,10); // YYYY-MM-DD
+        inc(summary.perDay, day);
+        if(a.type==='commentCard') summary.comments++;
+        if(a.type==='createCard') summary.creates++;
+        if(a.type==='deleteCard') summary.deletes++;
+        if(a.type==='moveCardToBoard') summary.movesToBoard++;
+        if(a.type==='moveCardFromBoard') summary.movesFromBoard++;
+        if(a.type==='updateCard') summary.updates++;
+        if(a.type==='addAttachmentToCard') summary.attachments++;
+        if(a.type==='addChecklistToCard' || a.type==='removeChecklistFromCard') summary.checklists++;
+      }
+      return summary;
+
+      function inc(map, key){ map.set(key, (map.get(key)||0)+1); }
+    }
+
+    function renderReport(summary){
+      if(!summary){ reportBox.innerHTML = `<div class='alert muted'>No actions filtered yet.</div>`; return; }
+
+      const kv = (k,v)=>`<div class='item'><div class='muted'>${k}</div><div class='val'>${v}</div></div>`;
+      const head = `
+        <div class='kpi'>
+          ${kv('Total actions', summary.total)}
+          ${kv('Comments', summary.comments)}
+          ${kv('Cards created', summary.creates)}
+          ${kv('Moves ↦ Board', summary.movesToBoard)}
+          ${kv('Moves ↤ Board', summary.movesFromBoard)}
+          ${kv('Updates', summary.updates)}
+          ${kv('Attachments', summary.attachments)}
+          ${kv('Checklist ops', summary.checklists)}
+          ${kv('Participants', summary.uniqueMembers.size)}
+        </div>`;
+
+      const mapToRows = (m, key='key', val='count') => Array.from(m.entries()).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({[key]:k,[val]:v}));
+
+      const perTypeRows = mapToRows(summary.perType, 'type');
+      const perMemberRows = mapToRows(summary.perMember, 'member');
+      const perDayRows = mapToRows(summary.perDay, 'day');
+
+      const table = (title, rows, cols) => {
+        if(!rows.length) return '';
+        return `
+          <div class='panel' style='margin-top:10px'>
+            <div class='muted'>${title}</div>
+            <div style='overflow:auto;max-height:280px'>
+              <table class='mono'>
+                <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+                <tbody>
+                  ${rows.map(r=>`<tr>${cols.map(c=>`<td>${escapeHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      };
+
+      const html = [head,
+        table('Actions by type', perTypeRows, ['type','count']),
+        table('Actions by member', perMemberRows, ['member','count']),
+        table('Actions by day', perDayRows, ['day','count'])
+      ].join('');
+
+      reportBox.innerHTML = html;
+
+      // enable CSV buttons
+      btnActionsCsv.disabled = !lastResult || !lastResult.length;
+      btnCommentsCsv.disabled = !(lastResult && lastResult.some(a=>a.type==='commentCard'));
+      btnTypesCsv.disabled = perTypeRows.length===0;
+      btnMembersCsv.disabled = perMemberRows.length===0;
+      btnDaysCsv.disabled = perDayRows.length===0;
+
+      // attach datasets for download handlers
+      reportBox.dataset.perType = JSON.stringify(perTypeRows);
+      reportBox.dataset.perMember = JSON.stringify(perMemberRows);
+      reportBox.dataset.perDay = JSON.stringify(perDayRows);
+
+      // charts availability
+      chartsSection.classList.remove('hidden');
+      btnRenderCharts.disabled = false;
+      btnDownloadCharts.disabled = true; // enabled after render
+      btnPdf.disabled = false;
+    }
+
+    function clearReport(){
+      reportBox.innerHTML = `<div class='alert muted'>Filter Actions to build a monthly report (includes comments).</div>`;
+      btnActionsCsv.disabled = btnTypesCsv.disabled = btnMembersCsv.disabled = btnDaysCsv.disabled = true;
+    }
+
+    // ---------- Render preview ----------
+    function renderPreview(items){
+      if(!items || !items.length){ preview.innerHTML = `<div class='alert'>No results for the selected month/year.</div>`; previewLabel.textContent = 'Preview'; return; }
+      const isCard = 'name' in items[0] && 'listId' in items[0];
+
+      const cols = isCard
+        ? ['id','name','listId','due','dateLastActivity','createdAt']
+        : ['date','type','memberCreator','card','list','comment'];
+
+      const rows = previewAll.checked ? items : items.slice(0,200);
+      previewLabel.textContent = previewAll.checked ? `Preview (all ${items.length} rows)` : `Preview (first ${rows.length} of ${items.length})`;
+
+      let html = `<div style='overflow:auto;max-height:520px'>`+
+        `<table class='mono'><thead><tr>` +
+        cols.map(c=>`<th>${c}</th>`).join('') + `</tr></thead><tbody>` +
+        rows.map(row=>`<tr>`+cols.map(c=>{
+          let v = row[c];
+          if(c==='comment') v = row?.data?.text || '';
+          return `<td>${escapeHtml(String(v ?? ''))}</td>`
+        }).join('')+`</tr>`).join('')+
+        `</tbody></table></div>`;
+
+      preview.innerHTML = html;
+    }
+
+    function escapeHtml(s){
+      return s
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'",'&#39;');
+    }
+
+    // ---------- Actions ----------
+    btnFilter.addEventListener('click', ()=>{
+      if(!board){ status.textContent = 'Please load JSON first'; return; }
+      const y = parseInt(year.value,10); const m = parseInt(month.value,10);
+      if(!(y>=2009 && y<=2100) || !(m>=1 && m<=12)){ status.textContent = 'Enter a valid month/year'; return; }
+
+      const target = document.querySelector("input[name='target']:checked").value;
+
+      if(target === 'cards'){
+        lastResult = filterCardsByMonth(board, y, m, cardDateField.value, includeClosed.checked);
+        document.getElementById('reportSection').classList.add('hidden');
+      } else {
+        const selected = onlyComments.checked ? ['commentCard'] : $$('#actionTypes input:checked').map(i=>i.value);
+        lastResult = filterActionsByMonth(board, y, m, selected.length? selected : null);
+        document.getElementById('reportSection').classList.remove('hidden');
+        const summary = buildReport(lastResult);
+        renderReport(summary);
+      }
+
+      kFiltered.textContent = String(lastResult.length);
+      renderPreview(lastResult);
+      btnDownload.disabled = btnCopy.disabled = lastResult.length === 0;
+
+      const label = target === 'cards' ? `${cardDateField.value}` : 'actions';
+      status.textContent = `Filtered ${lastResult.length} ${label} for ${y}-${String(m).padStart(2,'0')}`;
+    });
+
+    btnDownload.addEventListener('click', ()=>{
+      if(!lastResult) return;
+      const y = year.value, m = String(month.value).padStart(2,'0');
+      const target = document.querySelector("input[name='target']:checked").value;
+      const payload = JSON.stringify(lastResult, null, 2);
+      dl(`trello_${target}_${y}-${m}.json`, payload);
+    });
+
+    // ---------- Charts ----------
+    function drawBarChart(svg, rows, labelKey, valueKey){
+      const W = 800, H = 260, padL = 80, padR = 20, padT = 20, padB = 40;
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      while(svg.firstChild) svg.removeChild(svg.firstChild);
+      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+      svg.appendChild(g);
+
+      const n = rows.length; if(n===0) return;
+      const maxV = Math.max(...rows.map(r=>+r[valueKey]||0));
+      const barW = Math.max(4, (W - padL - padR) / n - 4);
+
+      // axes
+      const axis = (x1,y1,x2,y2)=>{ const l=document.createElementNS('http://www.w3.org/2000/svg','line'); l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);l.setAttribute('stroke','#2a3446'); svg.appendChild(l); };
+      axis(padL,padT, padL,H-padB); axis(padL,H-padB, W-padR,H-padB);
+
+      const scaleY = v => H-padB - (maxV? (v/maxV)*(H-padT-padB) : 0);
+
+      rows.forEach((r,i)=>{
+        const x = padL + i*(barW+4) + 2;
+        const y = scaleY(r[valueKey]);
+        const h = H-padB - y;
+        const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+        rect.setAttribute('x', x); rect.setAttribute('y', y); rect.setAttribute('width', barW); rect.setAttribute('height', h);
+        rect.setAttribute('fill', '#60a5fa');
+        g.appendChild(rect);
+
+        if(n<=20){
+          const tx = document.createElementNS('http://www.w3.org/2000/svg','text');
+          tx.setAttribute('x', x + barW/2); tx.setAttribute('y', H-padB+12); tx.setAttribute('text-anchor','middle'); tx.setAttribute('font-size','10'); tx.setAttribute('fill','#9aa5b1');
+          tx.textContent = String(r[labelKey]).slice(0,14);
+          g.appendChild(tx);
+        }
+      });
+
+      // y ticks
+      for(let t=0;t<=4;t++){
+        const v = Math.round((maxV*t)/4);
+        const y = scaleY(v);
+        const tx = document.createElementNS('http://www.w3.org/2000/svg','text');
+        tx.setAttribute('x', padL-6); tx.setAttribute('y', y+4); tx.setAttribute('text-anchor','end'); tx.setAttribute('font-size','10'); tx.setAttribute('fill','#9aa5b1');
+        tx.textContent = String(v);
+        svg.appendChild(tx);
+      }
+    }
+
+    function renderCharts(){
+      const perType = JSON.parse(reportBox.dataset.perType||'[]');
+      const perMember = JSON.parse(reportBox.dataset.perMember||'[]');
+      const perDay = JSON.parse(reportBox.dataset.perDay||'[]');
+      const top = Math.max(3, Math.min(50, parseInt(topMembers.value||'10',10)));
+      drawBarChart(chartEls.type, perType, 'type', 'count');
+      drawBarChart(chartEls.member, perMember.slice(0, top), 'member', 'count');
+      drawBarChart(chartEls.day, perDay, 'day', 'count');
+      btnDownloadCharts.disabled = false;
+    }
+
+    btnRenderCharts.addEventListener('click', renderCharts);
+
+    function svgToPng(svg){
+      const s = new XMLSerializer().serializeToString(svg);
+      const img = new Image();
+      const canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 260;
+      const ctx = canvas.getContext('2d');
+      return new Promise(res=>{
+        img.onload = ()=>{ ctx.drawImage(img,0,0); canvas.toBlob(b=>res(b),'image/png'); };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
       });
     }
-    return out;
-  }
 
-  // ---------- Report ----------
-  function buildReport(actions){
-    const summary = {
-      total: actions.length,
-      comments: 0,
-      creates: 0,
-      deletes: 0,
-      movesToBoard: 0,
-      movesFromBoard: 0,
-      updates: 0,
-      attachments: 0,
-      checklists: 0,
-      uniqueMembers: new Set(),
-      perType: new Map(),
-      perMember: new Map(),
-      perDay: new Map()
-    };
+    btnDownloadCharts.addEventListener('click', async ()=>{
+      const files = [ ['chart_type.png', chartEls.type], ['chart_member.png', chartEls.member], ['chart_day.png', chartEls.day] ];
+      for(const [name, el] of files){
+        const blob = await svgToPng(el); const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 2000);
+      }
+    });
 
-    for(const a of actions){
-      summary.uniqueMembers.add(a.memberId || a.memberCreator || 'Unknown');
-      inc(summary.perType, a.type);
-      inc(summary.perMember, a.memberCreator || 'Unknown');
-      const day = (a.date||'').slice(0,10); // YYYY-MM-DD
-      inc(summary.perDay, day);
-      if(a.type==='commentCard') summary.comments++;
-      if(a.type==='createCard') summary.creates++;
-      if(a.type==='deleteCard') summary.deletes++;
-      if(a.type==='moveCardToBoard') summary.movesToBoard++;
-      if(a.type==='moveCardFromBoard') summary.movesFromBoard++;
-      if(a.type==='updateCard') summary.updates++;
-      if(a.type==='addAttachmentToCard') summary.attachments++;
-      if(a.type==='addChecklistToCard' || a.type==='removeChecklistFromCard') summary.checklists++;
-    }
-    return summary;
-
-    function inc(map, key){ map.set(key, (map.get(key)||0)+1); }
-  }
-
-  function renderReport(summary){
-    if(!summary){ reportBox.innerHTML = `<div class='alert muted'>No actions filtered yet.</div>`; return; }
-
-    const kv = (k,v)=>`<div class='item'><div class='muted'>${k}</div><div class='val'>${v}</div></div>`;
-    const head = `
-      <div class='kpi'>
-        ${kv('Total actions', summary.total)}
-        ${kv('Comments', summary.comments)}
-        ${kv('Cards created', summary.creates)}
-        ${kv('Moves ↦ Board', summary.movesToBoard)}
-        ${kv('Moves ↤ Board', summary.movesFromBoard)}
-        ${kv('Updates', summary.updates)}
-        ${kv('Attachments', summary.attachments)}
-        ${kv('Checklist ops', summary.checklists)}
-        ${kv('Participants', summary.uniqueMembers.size)}
-      </div>`;
-
-    const mapToRows = (m, key='key', val='count') => Array.from(m.entries()).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({[key]:k,[val]:v}));
-
-    const perTypeRows = mapToRows(summary.perType, 'type');
-    const perMemberRows = mapToRows(summary.perMember, 'member');
-    const perDayRows = mapToRows(summary.perDay, 'day');
-
-    const table = (title, rows, cols) => {
-      if(!rows.length) return '';
-      return `
-        <div class='panel' style='margin-top:10px'>
-          <div class='muted'>${title}</div>
-          <div style='overflow:auto;max-height:280px'>
-            <table class='mono'>
-              <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
-              <tbody>
-                ${rows.map(r=>`<tr>${cols.map(c=>`<td>${escapeHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>`;
-    };
-
-    const html = [head,
-      table('Actions by type', perTypeRows, ['type','count']),
-      table('Actions by member', perMemberRows, ['member','count']),
-      table('Actions by day', perDayRows, ['day','count'])
-    ].join('');
-
-    reportBox.innerHTML = html;
-
-    // enable CSV buttons
-    btnActionsCsv.disabled = !lastResult || !lastResult.length;
-    btnTypesCsv.disabled = perTypeRows.length===0;
-    btnMembersCsv.disabled = perMemberRows.length===0;
-    btnDaysCsv.disabled = perDayRows.length===0;
-
-    // attach datasets for download handlers
-    reportBox.dataset.perType = JSON.stringify(perTypeRows);
-    reportBox.dataset.perMember = JSON.stringify(perMemberRows);
-    reportBox.dataset.perDay = JSON.stringify(perDayRows);
-  }
-
-  function clearReport(){
-    reportBox.innerHTML = `<div class='alert muted'>Filter Actions to build a monthly report (includes comments).</div>`;
-    btnActionsCsv.disabled = btnTypesCsv.disabled = btnMembersCsv.disabled = btnDaysCsv.disabled = true;
-  }
-
-  // ---------- Render preview ----------
-  function renderPreview(items){
-    if(!items || !items.length){ preview.innerHTML = `<div class='alert'>No results for the selected month/year.</div>`; return; }
-    const isCard = 'name' in items[0] && 'listId' in items[0];
-
-    const cols = isCard
-      ? ['id','name','listId','due','dateLastActivity','createdAt']
-      : ['date','type','memberCreator','card','list'];
-
-    const limit = items.slice(0,200);
-    let html = `<div style='overflow:auto;max-height:420px'><table class='mono'><thead><tr>` +
-      cols.map(c=>`<th>${c}</th>`).join('') + `</tr></thead><tbody>` +
-      limit.map(row=>`<tr>`+cols.map(c=>`<td>${escapeHtml(String(row[c] ?? ''))}</td>`).join('')+`</tr>`).join('')+
-      `</tbody></table></div>`;
-
-    if(items.length > limit.length){
-      html += `<div class='footer'>Showing first ${limit.length} of ${items.length} rows.</div>`;
-    }
-    preview.innerHTML = html;
-  }
-
-  function escapeHtml(s){
-    return s
-      .replaceAll('&','&amp;')
-      .replaceAll('<','&lt;')
-      .replaceAll('>','&gt;')
-      .replaceAll('"','&quot;')
-      .replaceAll("'",'&#39;');
-  }
-
-  // ---------- Actions ----------
-  btnFilter.addEventListener('click', ()=>{
-    if(!board){ status.textContent = 'Please load JSON first'; return; }
-    const y = parseInt(year.value,10); const m = parseInt(month.value,10);
-    if(!(y>=2009 && y<=2100) || !(m>=1 && m<=12)){ status.textContent = 'Enter a valid month/year'; return; }
-
-    const target = document.querySelector("input[name='target']:checked").value;
-
-    if(target === 'cards'){
-      lastResult = filterCardsByMonth(board, y, m, cardDateField.value, includeClosed.checked);
-      document.getElementById('reportSection').classList.add('hidden');
-    } else {
-      const selected = $$('#actionTypes input:checked').map(i=>i.value);
-      // If nothing selected, includes ALL actions (including comments)
-      lastResult = filterActionsByMonth(board, y, m, selected.length? selected : null);
-      document.getElementById('reportSection').classList.remove('hidden');
-      const summary = buildReport(lastResult);
-      renderReport(summary);
+    // ---------- PDF (print-ready) with popup-blocker safe fallback ----------
+    function buildReportHtml(y, m){
+      const style = document.querySelector('style').outerHTML;
+      const kpiHtml = reportBox.querySelector('.kpi')?.outerHTML || '';
+      const tablesHtml = Array.from(reportBox.querySelectorAll('table')).map(t=>t.outerHTML).join('');
+      if(btnDownloadCharts.disabled) renderCharts();
+      const typeSvg = chartEls.type.outerHTML;
+      const memberSvg = chartEls.member.outerHTML;
+      const daySvg = chartEls.day.outerHTML;
+      return `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Trello Report ${y}-${m}</title>${style}<style>body{background:white;color:#111}.card,.panel{box-shadow:none;background:white;border:0}</style></head><body class='wrap'>
+        <h1>Trello Monthly Report — ${y}-${m}</h1>
+        <div class='card panel'>${kpiHtml}</div>
+        <div class='card panel'>
+          <h2 class='muted'>Charts</h2>
+          <div>${typeSvg}</div>
+          <div style='margin-top:10px'>${memberSvg}</div>
+          <div style='margin-top:10px'>${daySvg}</div>
+        </div>
+        <div class='card panel'>
+          <h2 class='muted'>Tables</h2>
+          ${tablesHtml}
+        </div>
+        <script>window.onload = function(){ try{ window.print(); }catch(e){} };<\/script>
+      </body></html>`;
     }
 
-    kFiltered.textContent = String(lastResult.length);
-    renderPreview(lastResult);
-    btnDownload.disabled = btnCopy.disabled = lastResult.length === 0;
+    function generatePdf(){
+      const y = year.value, m = String(month.value).padStart(2,'0');
+      const html = buildReportHtml(y, m);
+      // Try popup first
+      let win = null;
+      try { win = window.open('about:blank'); } catch(e) { win = null; }
+      if(win && win.document){
+        // Write into the new window
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+        return;
+      }
+      // Fallback: blob URL + hidden iframe (popup-blocker safe)
+      const blob = new Blob([html], {type:'text/html'});
+      const url = URL.createObjectURL(blob);
+      const iframe = document.createElement('iframe');
+      iframe.style.position='fixed';
+      iframe.style.right='0';
+      iframe.style.bottom='0';
+      iframe.style.width='0';
+      iframe.style.height='0';
+      iframe.style.border='0';
+      iframe.onload = function(){
+        try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch(e) {}
+        setTimeout(()=>{ URL.revokeObjectURL(url); document.body.removeChild(iframe); }, 2000);
+      };
+      iframe.src = url;
+      document.body.appendChild(iframe);
+    }
 
-    const label = target === 'cards' ? `${cardDateField.value}` : 'actions';
-    status.textContent = `Filtered ${lastResult.length} ${label} for ${y}-${String(m).padStart(2,'0')}`;
-  });
+    btnPdf.addEventListener('click', generatePdf);
 
-  btnDownload.addEventListener('click', ()=>{
-    if(!lastResult) return;
-    const y = year.value, m = String(month.value).padStart(2,'0');
-    const target = document.querySelector("input[name='target']:checked").value;
-    const payload = JSON.stringify(lastResult, null, 2);
-    dl(`trello_${target}_${y}-${m}.json`, payload);
-  });
+    // ---------- CSV buttons ----------
+    byId('btnActionsCsv').addEventListener('click', ()=>{
+      if(!lastResult?.length) return;
+      const rows = lastResult.map(a=>(
+        {
+          date:a.date,
+          type:a.type,
+          member:a.memberCreator,
+          memberId:a.memberId,
+          card:a.card,
+          cardId:a.cardId,
+          list:a.list,
+          listBefore:a?.data?.listBefore?.name || '',
+          listAfter:a?.data?.listAfter?.name || '',
+          comment:a?.data?.text || ''
+        }
+      ));
+      dlCsv('actions.csv', rows, ['date','type','member','memberId','card','cardId','list','listBefore','listAfter','comment']);
+    });
 
-  byId('btnActionsCsv').addEventListener('click', ()=>{
-    if(!lastResult?.length) return;
-    dlCsv('actions.csv', lastResult.map(a=>({
-      date:a.date, type:a.type, member:a.memberCreator, card:a.card, list:a.list
-    })), ['date','type','member','card','list']);
-  });
-  byId('btnTypesCsv').addEventListener('click', ()=>{
-    const rows = JSON.parse(reportBox.dataset.perType || '[]');
-    if(!rows.length) return; dlCsv('actions_by_type.csv', rows, ['type','count']);
-  });
-  byId('btnMembersCsv').addEventListener('click', ()=>{
-    const rows = JSON.parse(reportBox.dataset.perMember || '[]');
-    if(!rows.length) return; dlCsv('actions_by_member.csv', rows, ['member','count']);
-  });
-  byId('btnDaysCsv').addEventListener('click', ()=>{
-    const rows = JSON.parse(reportBox.dataset.perDay || '[]');
-    if(!rows.length) return; dlCsv('actions_by_day.csv', rows, ['day','count']);
-  });
+    byId('btnCommentsCsv').addEventListener('click', ()=>{
+      if(!lastResult?.length) return;
+      const rows = lastResult.filter(a=>a.type==='commentCard').map(a=>({
+        date:a.date,
+        member:a.memberCreator,
+        memberId:a.memberId,
+        card:a.card,
+        cardId:a.cardId,
+        list:a.list,
+        comment:a?.data?.text || ''
+      }));
+      if(!rows.length) return;
+      dlCsv('comments.csv', rows, ['date','member','memberId','card','cardId','list','comment']);
+    });
 
-  btnCopy.addEventListener('click', async ()=>{
-    if(!lastResult) return;
-    try{ await navigator.clipboard.writeText(JSON.stringify(lastResult, null, 2)); status.textContent = 'Copied result JSON to clipboard'; }
-    catch{ status.textContent = 'Copy failed (clipboard blocked)'; }
-  });
+    byId('btnTypesCsv').addEventListener('click', ()=>{
+      const rows = JSON.parse(reportBox.dataset.perType || '[]');
+      if(!rows.length) return; dlCsv('actions_by_type.csv', rows, ['type','count']);
+    });
+    byId('btnMembersCsv').addEventListener('click', ()=>{
+      const rows = JSON.parse(reportBox.dataset.perMember || '[]');
+      if(!rows.length) return; dlCsv('actions_by_member.csv', rows, ['member','count']);
+    });
+    byId('btnDaysCsv').addEventListener('click', ()=>{
+      const rows = JSON.parse(reportBox.dataset.perDay || '[]');
+      if(!rows.length) return; dlCsv('actions_by_day.csv', rows, ['day','count']);
+    });
 
-})();
+    previewAll.addEventListener('change', ()=>{ if(lastResult) renderPreview(lastResult); });
+
+    btnCopy.addEventListener('click', async ()=>{
+      if(!lastResult) return;
+      try{ await navigator.clipboard.writeText(JSON.stringify(lastResult, null, 2)); status.textContent = 'Copied result JSON to clipboard'; }
+      catch{ status.textContent = 'Copy failed (clipboard blocked)'; }
+    });
+
+    // ---------------- Test Runner (adds coverage) ----------------
+    // Minimal unit tests to verify core behaviors
+    const testArea = document.createElement('section');
+    testArea.className = 'panel card';
+    testArea.style.marginTop = '14px';
+    testArea.innerHTML = `
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div class="muted">Self‑tests</div>
+        <button id="runTests" class="btn-secondary">Run tests</button>
+      </div>
+      <div id="testOutput" class="panel mono" style="overflow:auto;max-height:200px"></div>
+    `;
+    document.querySelector('.wrap').appendChild(testArea);
+
+    function assert(name, cond){
+      const el = byId('testOutput');
+      const line = document.createElement('div');
+      line.textContent = (cond? '✅':'❌') + ' ' + name;
+      el.appendChild(line);
+      return !!cond;
+    }
+
+    function runTests(){
+      byId('testOutput').innerHTML = '';
+      // monthRange
+      const r = monthRange(2025,10); // Oct
+      assert('monthRange returns start before end', r.start < r.end);
+      assert('monthRange start is Oct 1 UTC', r.start.toISOString().startsWith('2025-10-01'));
+
+      // createdFromId (hex timestamp)
+      const dt = createdFromId('66f1b5a0123456789abcde01');
+      assert('createdFromId returns a Date', dt instanceof Date && !isNaN(+dt));
+
+      // action filter comment inclusion
+      const demo = { actions: [
+        { type:'commentCard', date:'2025-10-10T00:00:00.000Z', memberCreator:{id:'m1', fullName:'A'}, data:{card:{id:'c1',name:'X'}, text:'hello'} },
+        { type:'updateCard', date:'2025-10-11T00:00:00.000Z', memberCreator:{id:'m2', fullName:'B'}, data:{card:{id:'c1',name:'X'}} },
+      ] };
+      const resAll = filterActionsByMonth(demo, 2025, 10, null);
+      assert('filterActionsByMonth returns 2 with no type filter', resAll.length===2);
+      const resOnlyC = filterActionsByMonth(demo, 2025, 10, ['commentCard']);
+      assert('filterActionsByMonth respects comment type', resOnlyC.length===1 && resOnlyC[0].type==='commentCard');
+
+      // PDF fallback (simulate blocked popup)
+      const openBackup = window.open;
+      window.open = () => null; // simulate blocker
+      try { generatePdf(); assert('generatePdf uses iframe fallback without throwing', true); } catch(e){ assert('generatePdf uses iframe fallback without throwing', false); }
+      window.open = openBackup;
+    }
+    byId('runTests').addEventListener('click', runTests);
+
+  })();
+});
 </script>
 </body>
 </html>
