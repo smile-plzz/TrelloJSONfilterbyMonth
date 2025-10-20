@@ -1,163 +1,182 @@
-🎯 Project Overview
 
-Build a Single-Page Web Application that loads a Trello Board JSON export (via file upload or paste), filters cards or actions by selected month and year, and provides downloadable filtered JSON and analytical reports.
 
-🔧 Functional Requirements
-1. Data Input
+# 🗂️ Trello JSON Month/Year Filter
 
-Accept .json Trello exports via:
+A **standalone, browser-based Trello JSON analyzer** that helps you filter cards, actions, and comments by **month and year** — no server required.
+Upload your Trello board export, choose a month, and instantly get:
 
-File upload
+* Filtered lists of cards or actions.
+* Full comment details.
+* Monthly summary reports.
+* Interactive bar charts.
+* One-click CSV and PDF exports.
 
-Paste in a text box
+All processing happens **locally in your browser** — no data ever leaves your computer.
 
-Validate JSON structure for presence of:
+---
 
-"cards" array
+## 🚀 Features
 
-"actions" array
+### 🔍 Core Filters
 
-2. Filtering Features
-Cards Filter
+* **Cards** – Filter by creation date, due date, or last activity.
+* **Actions** – Filter all activity, including comments, by month.
+* **Comment Extraction** – Include comment text (`commentCard`) for qualitative analysis.
 
-Filter cards based on:
+### 📊 Reporting
 
-Created Date (from createCard actions or ID timestamp)
+* **Automatic Monthly Report** (for Actions)
 
-Due Date
+  * KPIs: total actions, comments, card creations, checklist ops, etc.
+  * Summaries: actions by type, member, and day.
+* **Charts**
 
-Last Activity Date
+  * Bar charts for **Actions by Type**, **Member**, and **Day**.
+  * Adjustable top-member limit.
+  * Download charts as PNGs.
 
-Option to include/exclude closed cards
+### 📄 Exports
 
-Output filtered cards as JSON
+* **Filtered JSON** – Save filtered results.
+* **CSV Reports**
 
-Actions Filter
+  * All actions (with comment text)
+  * Comments only
+  * By type, member, or day
+* **PDF Reports**
 
-Filter all Trello actions by:
+  * Combines KPIs, charts, and tables into a print-ready report.
+  * Auto-opens “Save as PDF” dialog.
 
-Month and year of action date
+### 🧪 Built-in Self Tests
 
-Optional action type filters (e.g., commentCard, createCard, moveCardToBoard, etc.)
+A “Run tests” button verifies core functionality:
 
-Includes comments automatically when no types are selected.
+* Date range validation
+* Comment inclusion logic
+* Fallback printing when pop-ups are blocked
 
-Output filtered actions as JSON.
+---
 
-3. Reporting & Analytics
+## 🧩 How It Works
 
-After filtering actions, the app automatically generates:
+1. Export your Trello board:
 
-Monthly Activity Report
+   * Open your board → **Menu → More → Print and export → Export as JSON**
+2. Open `index.html` in any modern browser.
+3. Upload the JSON file or paste the contents.
+4. Choose:
 
-Includes:
+   * **Year and Month**
+   * **Target:** Cards or Actions
+   * **Date Field:** Created, Due, or Last Activity (for cards)
+   * (Optional) Filter by action types or comments only.
+5. Click **Filter**.
+6. Preview, analyze, or download your results:
 
-KPI summary:
+   * JSON, CSV, or full PDF report.
 
-Total actions
+---
 
-Comments count
+## 🧱 Technical Overview
 
-Cards created
+### Frontend
 
-Moves to/from boards
+* Pure **HTML + CSS + JavaScript** — no dependencies.
+* Runs entirely offline (using the File API and Blob URLs).
 
-Updates
+### Architecture
 
-Attachments
+| Component                | Responsibility                                               |
+| ------------------------ | ------------------------------------------------------------ |
+| `filterCardsByMonth()`   | Filters cards by date range and date field                   |
+| `filterActionsByMonth()` | Filters actions by type and date                             |
+| `buildReport()`          | Generates KPI counts and grouped summaries                   |
+| `renderReport()`         | Renders tables and enables CSV exports                       |
+| `drawBarChart()`         | SVG-based bar chart renderer (no libraries)                  |
+| `generatePdf()`          | Creates a self-contained HTML report and triggers print/save |
+| `runTests()`             | Built-in unit tests (runs in-browser)                        |
 
-Checklist operations
+### Data Handling
 
-Number of active members
+* `monthRange(year, month)` returns UTC start/end boundaries.
+* Comment text lives in `action.data.text`.
+* Dates are normalized with `Date.UTC()` for consistent filtering.
 
-Tables:
+---
 
-Actions by Type
+## 🧪 Running the App
 
-Actions by Member
+Simply open `index.html` in your browser:
 
-Actions by Day
+```bash
+# No dependencies required
+open index.html
+```
 
-CSV Exports:
+If testing locally via file:// protocol throws CORS issues for chart downloads (rare on Chromium browsers), you can use a lightweight static server:
 
-actions.csv
+```bash
+python3 -m http.server 8080
+# Then visit http://localhost:8080
+```
 
-actions_by_type.csv
+---
 
-actions_by_member.csv
+## 🧠 Developer Notes
 
-actions_by_day.csv
+### Key Files
 
-4. Outputs
+| File                   | Description                             |
+| ---------------------- | --------------------------------------- |
+| `index.html`           | Main application and all JS logic       |
+| `README.md`            | This documentation                      |
+| (optional) `style.css` | You can extract CSS for maintainability |
 
-Filtered JSON Download
+### Adding New Features
 
-Named trello_actions_YYYY-MM.json or trello_cards_YYYY-MM.json
+* To include new Trello action types, append to the `POP_TYPES` array.
+* To add more KPIs or visualizations:
 
-Clipboard Copy for quick sharing
+  * Extend `buildReport()` to count or group by new fields.
+  * Add a new chart via `drawBarChart(svg, rows, labelKey, valueKey)`.
 
-CSV Downloads for reporting and visualization
+### Common Pitfalls
 
-Preview Table
+| Issue                                                 | Fix                                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------------------- |
+| “Cannot read properties of null (reading 'document')” | Fixed by wrapping all code in `DOMContentLoaded`.                     |
+| Pop-up blocker prevents PDF generation                | Falls back to iframe-based print method automatically.                |
+| Large dataset slows preview                           | Disable “Preview all rows” toggle to limit preview to first 200 rows. |
 
-First 200 results shown in a scrollable view
+---
 
-🖥️ User Interface Requirements
+## 📘 Test Cases
 
-Minimal dark-theme dashboard
+| Test                       | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| **monthRange()**           | Returns correct UTC start/end for given year/month. |
+| **createdFromId()**        | Extracts date from Trello card ID.                  |
+| **filterActionsByMonth()** | Filters correctly by type and date.                 |
+| **generatePdf()**          | Falls back gracefully if pop-ups are blocked.       |
 
-Responsive layout
+Run tests by clicking **Run tests** in the UI — results appear inline with ✅ / ❌ indicators.
 
-Components:
+---
 
-File uploader
+## 📄 License
 
-Month/year selector
+MIT License.
+You are free to modify, distribute, and embed this app in your Trello analytics workflows.
 
-Target toggle (Cards / Actions)
+---
 
-Action type checkboxes
+## 👨‍💻 Author & Contributions
 
-Buttons: Filter, Download JSON, Copy JSON, CSV Downloads
+Created by **[Ismail Hossain]** – DevsNest Workspace
+For issues, contributions, or enhancements:
 
-Stats counters for:
+* PRs and feedback welcome
+* Built for real-world Trello reporting and automation needs
 
-Total cards/actions loaded
 
-Filtered results
-
-Report section (hidden until Actions filtered)
-
-⚙️ Technical Requirements
-Feature	Implementation
-Language	HTML, CSS, JavaScript
-Framework	None (vanilla JS)
-Storage	Client-side only
-Processing	Offline — all in-browser
-Browser Support	Chrome, Firefox, Safari, Edge
-Libraries	None required
-Output Format	JSON + CSV
-File Naming	Auto-generated from filter selection
-🧩 Non-Functional Requirements
-
-Performance: Must handle JSON files up to 10 MB efficiently.
-
-Security: No network requests or data uploads.
-
-Accessibility: Keyboard navigation and clear contrast for text.
-
-Usability: Real-time status messages and helpful tooltips.
-
-Extensibility: Easily add new filters or export formats (PDF, Charts).
-
-📈 Future Enhancements (Optional)
-
-PDF Report Export with charts and KPIs.
-
-Interactive Data Visualization (actions by user/type/day).
-
-Persistent History (using browser local storage).
-
-Direct Trello API integration for live data fetch.
-
-Team Comparison Mode across months.
