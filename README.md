@@ -1,13 +1,13 @@
 
 
-# 🗂️ Trello JSON Month/Year Filter
+# 🗂️ Trello JSON Date Filter
 
-A **standalone, browser-based Trello JSON analyzer** that helps you filter cards, actions, and comments by **month and year** — no server required.
-Upload your Trello board export, choose a month, and instantly get:
+A **standalone, browser-based Trello JSON analyzer** that helps you filter cards, actions, and comments by a **single month** or a **custom date range** — no server required.
+Upload your Trello board export, choose a month or date window, and instantly get:
 
 * Filtered lists of cards or actions.
 * Full comment details.
-* Monthly summary reports.
+* Range-based summary reports.
 * Interactive bar charts.
 * One-click CSV and PDF exports.
 
@@ -20,12 +20,13 @@ All processing happens **locally in your browser** — no data ever leaves your 
 ### 🔍 Core Filters
 
 * **Cards** – Filter by creation date, due date, or last activity.
-* **Actions** – Filter all activity, including comments, by month.
+* **Actions** – Filter all activity, including comments, by month or custom range.
 * **Comment Extraction** – Include comment text (`commentCard`) for qualitative analysis.
+* **Time Range Modes** – Toggle between quick month/year selection and precise start/end dates.
 
 ### 📊 Reporting
 
-* **Automatic Monthly Report** (for Actions)
+* **Activity Report** (for Actions)
 
   * KPIs: total actions, comments, card creations, checklist ops, etc.
   * Summaries: actions by type, member, and day.
@@ -67,7 +68,7 @@ A “Run tests” button verifies core functionality:
 3. Upload the JSON file or paste the contents.
 4. Choose:
 
-   * **Year and Month**
+   * **Year and Month** or switch to a **Custom Date Range**
    * **Target:** Cards or Actions
    * **Date Field:** Created, Due, or Last Activity (for cards)
    * (Optional) Filter by action types or comments only.
@@ -87,19 +88,21 @@ A “Run tests” button verifies core functionality:
 
 ### Architecture
 
-| Component                | Responsibility                                               |
-| ------------------------ | ------------------------------------------------------------ |
-| `filterCardsByMonth()`   | Filters cards by date range and date field                   |
-| `filterActionsByMonth()` | Filters actions by type and date                             |
-| `buildReport()`          | Generates KPI counts and grouped summaries                   |
-| `renderReport()`         | Renders tables and enables CSV exports                       |
-| `drawBarChart()`         | SVG-based bar chart renderer (no libraries)                  |
-| `generatePdf()`          | Creates a self-contained HTML report and triggers print/save |
-| `runTests()`             | Built-in unit tests (runs in-browser)                        |
+| Component                 | Responsibility                                               |
+| ------------------------- | ------------------------------------------------------------ |
+| `getActiveRange()`        | Normalizes month vs. custom range selections                 |
+| `filterCardsInRange()`    | Filters cards by date range and date field                   |
+| `filterActionsInRange()`  | Filters actions by type and date                             |
+| `buildReport()`           | Generates KPI counts and grouped summaries                   |
+| `renderReport()`          | Renders tables and enables CSV exports                       |
+| `drawBarChart()`          | SVG-based bar chart renderer (no libraries)                  |
+| `generatePdf()`           | Creates a self-contained HTML report and triggers print/save |
+| `runTests()`              | Built-in unit tests (runs in-browser)                        |
 
 ### Data Handling
 
-* `monthRange(year, month)` returns UTC start/end boundaries.
+* `monthRange(year, month)` returns UTC start/end boundaries plus a printable label.
+* Custom ranges use `parseDateInput()` and UTC math to include the entire end date.
 * Comment text lives in `action.data.text`.
 * Dates are normalized with `Date.UTC()` for consistent filtering.
 
@@ -153,12 +156,13 @@ python3 -m http.server 8080
 
 ## 📘 Test Cases
 
-| Test                       | Description                                         |
-| -------------------------- | --------------------------------------------------- |
-| **monthRange()**           | Returns correct UTC start/end for given year/month. |
-| **createdFromId()**        | Extracts date from Trello card ID.                  |
-| **filterActionsByMonth()** | Filters correctly by type and date.                 |
-| **generatePdf()**          | Falls back gracefully if pop-ups are blocked.       |
+| Test                        | Description                                         |
+| --------------------------- | --------------------------------------------------- |
+| **monthRange()**            | Returns correct UTC start/end/label for given month |
+| **createdFromId()**         | Extracts date from Trello card ID.                  |
+| **filterActionsInRange()**  | Filters correctly by type and date.                 |
+| **getActiveRange()**        | Validates custom start/end dates.                   |
+| **generatePdf()**           | Falls back gracefully if pop-ups are blocked.       |
 
 Run tests by clicking **Run tests** in the UI — results appear inline with ✅ / ❌ indicators.
 
