@@ -176,6 +176,8 @@
         </div>
       </div>
 
+      <div id="limitNotice" class="alert muted hidden" style="margin-top:12px"></div>
+
       <div class="sticky-bar panel" style="margin-top:8px">
         <div class="row" style="justify-content:space-between;align-items:center">
           <div class="muted" id="previewLabel">Preview (all rows)</div>
@@ -250,6 +252,11 @@ document.addEventListener('DOMContentLoaded', function(){
     function addUtcDays(date, days){ const d = new Date(date.getTime()); d.setUTCDate(d.getUTCDate()+days); return d; }
     function slugifyRange(label){ return label.replace(/[^0-9A-Za-z-_]+/g,'_'); }
     function parseISO(s){ if(!s) return null; const d = new Date(s); return isNaN(d) ? null : d; }
+    function formatUtcDateTime(date){
+      if(!date) return null;
+      const pad = (n)=>String(n).padStart(2,'0');
+      return `${date.getUTCFullYear()}-${pad(date.getUTCMonth()+1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`;
+    }
     function createdFromId(id){
       try{ const secs = parseInt(id.slice(0,8),16); return new Date(secs*1000); }catch{ return null }
     }
@@ -274,6 +281,7 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 
     // ---------- State ----------
+    const ACTION_EXPORT_LIMIT = 1000;
     let board = null; // parsed Trello export
     let lastResult = null; // filtered array
     let lastRange = null; // {start,end,label}
@@ -317,6 +325,7 @@ document.addEventListener('DOMContentLoaded', function(){
     const btnDownloadCharts = byId('btnDownloadCharts');
     const topMembers = byId('topMembers');
     const chartEls = { type: byId('chartType'), member: byId('chartMember'), day: byId('chartDay') };
+    const limitNotice = byId('limitNotice');
 
     // ---------- Setup defaults ----------
     const now = new Date();
@@ -400,11 +409,35 @@ document.addEventListener('DOMContentLoaded', function(){
     });
 
     function updateStats(){
-      if(!board){ kCards.textContent = '0'; kActions.textContent='0'; return; }
+      if(!board){
+        kCards.textContent = '0';
+        kActions.textContent='0';
+        if(limitNotice){
+          limitNotice.classList.add('hidden');
+          limitNotice.textContent = '';
+        }
+        return;
+      }
       const cards = Array.isArray(board.cards)? board.cards.length : 0;
       const actions = Array.isArray(board.actions)? board.actions.length : 0;
       kCards.textContent = String(cards);
       kActions.textContent = String(actions);
+      if(limitNotice){
+        const limitHit = Array.isArray(board.actions) && actions >= ACTION_EXPORT_LIMIT;
+        if(limitHit){
+          let oldest = null;
+          for(const action of board.actions){
+            const dt = parseISO(action?.date);
+            if(dt && (!oldest || dt < oldest)) oldest = dt;
+          }
+          const oldestLabel = formatUtcDateTime(oldest);
+          limitNotice.classList.remove('hidden');
+          limitNotice.innerHTML = `This export already contains ${actions.toLocaleString()} actions. Trello board exports only include the most recent ${ACTION_EXPORT_LIMIT.toLocaleString()} actions, so older history isn't present${oldestLabel ? ` (oldest action in file: ${oldestLabel})` : ''}.`;
+        } else {
+          limitNotice.classList.add('hidden');
+          limitNotice.textContent = '';
+        }
+      }
     }
 
     // ---------- Filtering core ----------
